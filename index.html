@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14181d">
+<title>S900+ Absteckung</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<style>
+:root{--bg:#14181d;--panel:#1d232a;--line:#2c343d;--txt:#e8edf2;--mut:#93a0ad;--acc:#3fa7ff;--ok:#2ecc71;--warn:#f5a623;--bad:#ff5a52;}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+button,input,select{font:inherit;color:inherit}
+button{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer}
+button.pri{background:var(--acc);border-color:var(--acc);color:#04121f;font-weight:600}
+button.big{width:100%;padding:16px;font-size:18px}
+button:disabled{opacity:.45}
+input,select{background:#0f1317;border:1px solid var(--line);border-radius:8px;padding:8px;width:100%}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:8px 10px calc(6px) 10px}
+.row{display:flex;gap:8px;align-items:center}
+.row>*{flex:1}
+.stat{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;font-size:13px}
+.chip{padding:3px 8px;border-radius:99px;background:var(--panel);border:1px solid var(--line);white-space:nowrap}
+.chip.ok{background:#123d26;border-color:var(--ok)}
+.chip.warn{background:#41300c;border-color:var(--warn)}
+.chip.bad{background:#451a18;border-color:var(--bad)}
+.coord{font-variant-numeric:tabular-nums;font-size:13px;color:var(--mut);margin-top:4px}
+nav{display:flex;border-bottom:1px solid var(--line);position:sticky;top:0}
+nav button{flex:1;border:0;border-radius:0;background:transparent;padding:10px 0;color:var(--mut)}
+nav button.on{color:var(--txt);box-shadow:inset 0 -3px 0 var(--acc)}
+main{padding:10px 10px 40px}
+section{display:none}
+section.on{display:block}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:10px}
+.mut{color:var(--mut);font-size:13px}
+.list{max-height:40vh;overflow:auto;margin-top:6px}
+.item{display:flex;justify-content:space-between;gap:8px;padding:9px 6px;border-bottom:1px solid var(--line);align-items:center}
+.item.sel{background:#16324d}
+.item.done .nm{text-decoration:line-through;color:var(--mut)}
+.item .nm{font-weight:600}
+.item .d{font-variant-numeric:tabular-nums;color:var(--mut);white-space:nowrap}
+#navview{text-align:center}
+#tname{font-size:18px;font-weight:700;margin-bottom:2px}
+#dist{font-size:44px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+#comp{font-size:17px;font-variant-numeric:tabular-nums;margin-top:4px}
+#dh{font-size:15px;color:var(--mut);margin-top:2px}
+svg#gfx{width:min(86vw,360px);height:min(86vw,360px);display:block;margin:6px auto}
+.hint{font-size:12px;color:var(--mut)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+label{font-size:13px;color:var(--mut);display:block;margin-bottom:3px}
+#msg{position:fixed;left:10px;right:10px;bottom:14px;z-index:9;background:#0b2a45;border:1px solid var(--acc);padding:10px 12px;border-radius:10px;display:none}
+#msg.err{background:#3d1311;border-color:var(--bad)}
+pre#log{font-size:11px;max-height:30vh;overflow:auto;background:#0f1317;padding:6px;border-radius:8px;white-space:pre-wrap;word-break:break-all}
+.inz{background:var(--ok)!important;color:#03200f}
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <button id="btnConn" class="pri">S900+ verbinden</button>
+    <button id="btnGeo" style="flex:0 0 auto">Handy-GPS</button>
+  </div>
+  <div class="stat">
+    <span id="cSrc" class="chip">nicht verbunden</span>
+    <span id="cFix" class="chip">kein Fix</span>
+    <span id="cSat" class="chip">Sat –</span>
+    <span id="cAcc" class="chip">± –</span>
+    <span id="cAge" class="chip">Korr –</span>
+  </div>
+  <div id="coord" class="coord">E – · N – · H –</div>
+</header>
+<nav>
+  <button data-t="nav" class="on">Absteckung</button>
+  <button data-t="rec">Aufnahme</button>
+  <button data-t="set">Einstellungen</button>
+</nav>
+<main>
+<!-- ============ ABSTECKUNG ============ -->
+<section id="t-nav" class="on">
+  <div class="card" id="navview">
+    <div id="tname">Kein Ziel gewählt</div>
+    <div id="dist">–</div>
+    <div id="comp"></div>
+    <div id="dh"></div>
+    <svg id="gfx" viewBox="-100 -100 200 200"></svg>
+    <div class="row">
+      <select id="hdgMode">
+        <option value="compass">Ausrichtung: Handy-Kompass</option>
+        <option value="course">Ausrichtung: Laufrichtung (GNSS)</option>
+        <option value="north">Norden oben</option>
+      </select>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnDone">Abgesteckt ✓</button>
+      <button id="btnNext">Nächster Punkt</button>
+    </div>
+    <div id="hdgInfo" class="hint" style="margin-top:6px"></div>
+  </div>
+  <div class="card">
+    <div class="row">
+      <button id="btnKml" class="pri">KML laden</button>
+      <button id="btnClrT" style="flex:0 0 auto">Liste leeren</button>
+    </div>
+    <input type="file" id="fileKml" accept=".kml,application/vnd.google-earth.kml+xml,text/xml" multiple hidden>
+    <div class="row" style="margin-top:8px">
+      <select id="sortT"><option value="file">Reihenfolge wie Datei</option><option value="dist">nach Entfernung</option></select>
+    </div>
+    <div id="tCount" class="mut" style="margin-top:6px">Keine Punkte geladen.</div>
+    <div id="tList" class="list"></div>
+  </div>
+</section>
+
+<!-- ============ AUFNAHME ============ -->
+<section id="t-rec">
+  <div class="card">
+    <div class="grid2">
+      <div><label>Präfix</label><input id="rPrefix" value="P"></div>
+      <div><label>Nächste Nr.</label><input id="rNext" type="number" value="1" min="1"></div>
+      <div><label>Code / Bemerkung</label><input id="rCode" placeholder="optional"></div>
+      <div><label>Mittelung</label>
+        <select id="rAvg"><option value="0">aus (1 Epoche)</option><option value="3">3 s</option><option value="5">5 s</option><option value="10">10 s</option><option value="30">30 s</option></select>
+      </div>
+    </div>
+    <div style="margin-top:10px"><button id="btnRec" class="pri big">Punkt speichern</button></div>
+    <div id="recInfo" class="hint" style="margin-top:6px"></div>
+  </div>
+  <div class="card">
+    <div class="row">
+      <button id="btnExpKml">Export KML</button>
+      <button id="btnExpCsv">Export CSV</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnRecToT">Als Absteckziele übernehmen</button>
+      <button id="btnClrR" style="flex:0 0 auto">Alle löschen</button>
+    </div>
+    <div id="rCount" class="mut" style="margin-top:6px">Noch keine Punkte aufgenommen.</div>
+    <div id="rList" class="list"></div>
+  </div>
+</section>
+
+<!-- ============ EINSTELLUNGEN ============ -->
+<section id="t-set">
+  <div class="card">
+    <div class="grid2">
+      <div><label>UTM-Zone (Anzeige/Export)</label>
+        <select id="sZone"><option value="32">32 (EPSG:25832)</option><option value="33">33 (EPSG:25833)</option></select></div>
+      <div><label>Missweisung (° Ost)</label><input id="sDecl" type="number" step="0.1"></div>
+      <div><label>Ziel erreicht bei (m)</label><input id="sTol" type="number" step="0.01" min="0.01"></div>
+      <div><label>Stabhöhe (m, von Höhe abziehen)</label><input id="sPole" type="number" step="0.001" min="0"></div>
+      <div><label>Feinansicht ab (m)</label><input id="sNear" type="number" step="0.5" min="0.5"></div>
+      <div><label>Ecken von Linien/Flächen laden</label>
+        <select id="sVert"><option value="1">ja</option><option value="0">nein</option></select></div>
+    </div>
+    <p class="hint">Stabhöhe nur eintragen, wenn sie <b>nicht</b> schon im S900+ eingestellt ist. KML-Punkte ohne Koordinaten, aber mit SimpleData x/y, werden als UTM in der gewählten Zone gelesen.</p>
+  </div>
+  <div class="card">
+    <div class="row"><button id="btnLog">NMEA-Protokoll an/aus</button><button id="btnClrLog" style="flex:0 0 auto">leeren</button></div>
+    <div id="logInfo" class="hint" style="margin-top:6px"></div>
+    <pre id="log" hidden></pre>
+  </div>
+  <div class="card hint">
+    <b>Voraussetzungen</b><br>
+    • Android, Chrome ab Version 137, Seite über HTTPS geöffnet<br>
+    • S900+ einmal in den Android-Bluetooth-Einstellungen gekoppelt<br>
+    • S900+ gibt NMEA (GGA, möglichst RMC und GST) über Bluetooth aus – einstellbar im Webinterface (192.168.10.1)<br>
+    • RTK-Korrekturen (SAPOS) holt sich der S900+ selbst über seine SIM
+  </div>
+</section>
+</main>
+<div id="msg"></div>
+
+<!-- ============ KERN (reine Funktionen) ============ -->
+<script id="core">
+const GEO = (() => {
+  const a = 6378137, f = 1/298.257222101, e2 = f*(2-f), k0 = 0.9996;
+  const n = f/(2-f), n2=n*n, n3=n2*n;
+  const A = a/(1+n)*(1+n2/4+n2*n2/64);
+  const al=[n/2-2*n2/3+5*n3/16, 13*n2/48-3*n3/5, 61*n3/240];
+  const be=[n/2-2*n2/3+37*n3/96, n2/48+n3/15, 17*n3/480];
+  const de=[2*n-2*n2/3-2*n3, 7*n2/3-8*n3/5, 56*n3/15];
+  const R=Math.PI/180;
+  function toUTM(lat, lon, zone){
+    const phi=lat*R, lam=(lon-(zone*6-183))*R;
+    const c=2*Math.sqrt(n)/(1+n);
+    const t=Math.sinh(Math.atanh(Math.sin(phi)) - c*Math.atanh(c*Math.sin(phi)));
+    const xi=Math.atan2(t, Math.cos(lam)), eta=Math.atanh(Math.sin(lam)/Math.sqrt(1+t*t));
+    let E=eta, N=xi;
+    for(let j=1;j<=3;j++){E+=al[j-1]*Math.cos(2*j*xi)*Math.sinh(2*j*eta); N+=al[j-1]*Math.sin(2*j*xi)*Math.cosh(2*j*eta);}
+    return {E:500000+k0*A*E, N:k0*A*N};
+  }
+  function fromUTM(E, N, zone){
+    const xi=N/(k0*A), eta=(E-500000)/(k0*A);
+    let xp=xi, ep=eta;
+    for(let j=1;j<=3;j++){xp-=be[j-1]*Math.sin(2*j*xi)*Math.cosh(2*j*eta); ep-=be[j-1]*Math.cos(2*j*xi)*Math.sinh(2*j*eta);}
+    const chi=Math.asin(Math.sin(xp)/Math.cosh(ep));
+    let phi=chi; for(let j=1;j<=3;j++) phi+=de[j-1]*Math.sin(2*j*chi);
+    const lam=Math.atan2(Math.sinh(ep), Math.cos(xp));
+    return {lat:phi/R, lon:(zone*6-183)+lam/R};
+  }
+  // lokale Abweichung (Meter am Boden) von p nach q: dN, dE
+  function delta(p, q){
+    const phi=((p.lat+q.lat)/2)*R, s=Math.sin(phi), w=Math.sqrt(1-e2*s*s);
+    const M=a*(1-e2)/(w*w*w), Nn=a/w;
+    const dN=(q.lat-p.lat)*R*M, dE=(q.lon-p.lon)*R*Nn*Math.cos(phi);
+    const d=Math.hypot(dN,dE);
+    let brg=Math.atan2(dE,dN)/R; if(brg<0) brg+=360;
+    return {dN, dE, d, brg};
+  }
+  return {toUTM, fromUTM, delta};
+})();
+
+const NMEA = (() => {
+  function ckOk(s){
+    const i=s.indexOf('*'); if(i<0) return true;
+    let c=0; for(let k=1;k<i;k++) c^=s.charCodeAt(k);
+    return c===parseInt(s.slice(i+1,i+3),16);
+  }
+  function ll(v, h, deg){ // ddmm.mmmm
+    if(!v) return NaN;
+    const d=parseInt(v.slice(0,deg),10), m=parseFloat(v.slice(deg));
+    let x=d+m/60; if(h==='S'||h==='W') x=-x; return x;
+  }
+  const num=v=>v===''||v==null?NaN:parseFloat(v);
+  function parse(line){
+    const st=line.indexOf('$'); if(st<0) return null;
+    const s=line.slice(st).trim();
+    if(s.length<7 || !ckOk(s)) return null;
+    const body=s.split('*')[0], f=body.split(',');
+    const id=f[0]; if(id[1]==='P') return null;
+    const typ=id.slice(3);
+    if(typ==='GGA'){
+      return {typ, time:f[1], lat:ll(f[2],f[3],2), lon:ll(f[4],f[5],3), q:parseInt(f[6]||'0',10),
+        sats:parseInt(f[7]||'0',10), hdop:num(f[8]), alt:num(f[9]), sep:num(f[11]), age:num(f[13]), ref:f[14]||''};
+    }
+    if(typ==='RMC'){
+      return {typ, valid:f[2]==='A', speed:num(f[7])*0.514444, course:num(f[8])};
+    }
+    if(typ==='GST'){
+      return {typ, sLat:num(f[6]), sLon:num(f[7]), sAlt:num(f[8])};
+    }
+    return {typ};
+  }
+  const Q={0:'kein Fix',1:'Autonom',2:'DGPS',3:'PPS',4:'RTK Fix',5:'RTK Float',6:'Schätzung',7:'manuell',8:'Simulation',9:'SBAS'};
+  return {parse, Q};
+})();
+
+const KML = (() => {
+  function txt(el, tag){const x=el.getElementsByTagName(tag)[0]; return x?x.textContent.trim():'';}
+  function coords(s){
+    return s.trim().split(/\s+/).map(t=>t.split(',').map(Number)).filter(c=>c.length>=2&&isFinite(c[0])&&isFinite(c[1]));
+  }
+  function parse(xml, opts){
+    const doc=new DOMParser().parseFromString(xml,'application/xml');
+    if(doc.getElementsByTagName('parsererror').length) throw new Error('KML nicht lesbar');
+    const out=[], pms=doc.getElementsByTagName('Placemark');
+    for(let i=0;i<pms.length;i++){
+      const pm=pms[i];
+      const name=txt(pm,'name')||('Punkt '+(out.length+1));
+      const desc=txt(pm,'description');
+      const pts=pm.getElementsByTagName('Point');
+      let got=false;
+      for(let k=0;k<pts.length;k++){
+        const c=coords(txt(pts[k],'coordinates'));
+        if(c.length){out.push({name:pts.length>1?name+'-'+(k+1):name, lat:c[0][1], lon:c[0][0], h:c[0][2], desc}); got=true;}
+      }
+      if(!got && opts.vertices){
+        const geoms=[...pm.getElementsByTagName('LineString'),...pm.getElementsByTagName('LinearRing')];
+        let idx=1;
+        for(const g of geoms){
+          let c=coords(txt(g,'coordinates'));
+          if(c.length>2 && c[0][0]===c[c.length-1][0] && c[0][1]===c[c.length-1][1]) c=c.slice(0,-1);
+          for(const p of c){out.push({name:name+'-'+(idx++), lat:p[1], lon:p[0], h:p[2], desc}); got=true;}
+        }
+      }
+      if(!got){ // SimpleData x/y (UTM)
+        const sd={}; const els=pm.getElementsByTagName('SimpleData');
+        for(let k=0;k<els.length;k++) sd[(els[k].getAttribute('name')||'').toLowerCase()]=els[k].textContent.trim();
+        const dt=pm.getElementsByTagName('Data');
+        for(let k=0;k<dt.length;k++) sd[(dt[k].getAttribute('name')||'').toLowerCase()]=txt(dt[k],'value');
+        let x=parseFloat((sd.x||sd.e||sd.ost||sd.rechtswert||'').replace(',','.'));
+        let y=parseFloat((sd.y||sd.n||sd.nord||sd.hochwert||'').replace(',','.'));
+        if(isFinite(x)&&isFinite(y)){
+          let z=opts.zone; if(x>1e7){z=Math.floor(x/1e6); x-=z*1e6;}
+          const g=GEO.fromUTM(x,y,z);
+          const nm=sd.id?(name.startsWith('Punkt ')?sd.id:name):name;
+          out.push({name:nm, lat:g.lat, lon:g.lon, h:parseFloat(sd.z||sd.h||''), desc});
+        }
+      }
+    }
+    return out.map(p=>({...p, h:isFinite(p.h)&&p.h!==0?p.h:null}));
+  }
+  const esc=s=>String(s).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+  function build(points, title){
+    const pm=points.map(p=>`  <Placemark>
+    <name>${esc(p.name)}</name>${p.code?`\n    <description>${esc(p.code)}</description>`:''}
+    <ExtendedData>
+      <Data name="E"><value>${p.E.toFixed(3)}</value></Data>
+      <Data name="N"><value>${p.N.toFixed(3)}</value></Data>
+      <Data name="Zone"><value>${p.zone}</value></Data>
+      <Data name="Fix"><value>${esc(NMEA.Q[p.q]||p.q)}</value></Data>
+      <Data name="Sats"><value>${p.sats}</value></Data>
+      <Data name="Sigma_m"><value>${p.sig!=null?p.sig.toFixed(3):''}</value></Data>
+      <Data name="Zeit"><value>${p.time}</value></Data>
+    </ExtendedData>
+    <Point><coordinates>${p.lon.toFixed(9)},${p.lat.toFixed(9)},${p.h!=null?p.h.toFixed(3):0}</coordinates></Point>
+  </Placemark>`).join('\n');
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+  <name>${esc(title)}</name>
+${pm}
+</Document>
+</kml>
+`;
+  }
+  return {parse, build};
+})();
+</script>
+
+<!-- ============ APP ============ -->
+<script>
+const $=id=>document.getElementById(id);
+const fmt=(v,d)=>v==null||!isFinite(v)?'–':v.toFixed(d).replace('.',',');
+const store={
+  get(k,def){try{const v=localStorage.getItem('s900_'+k);return v?JSON.parse(v):def;}catch(e){return def;}},
+  set(k,v){try{localStorage.setItem('s900_'+k,JSON.stringify(v));}catch(e){}}
+};
+const S=Object.assign({zone:33,decl:5.0,tol:0.05,pole:0,near:2,vert:1,hdgMode:'compass',sort:'file'},store.get('set',{}));
+let targets=store.get('targets',[]);       // {name,lat,lon,h,done}
+let recorded=store.get('rec',[]);
+let sel=store.get('sel',null);
+let fix=null, lastGGA=0, course=null, speed=0;
+let compass=null, compassAt=0;
+let port=null, reader=null, pipeDone=null, wantConn=false, geoWatch=null, source='none';
+let logOn=false, logLines=[], bytes=0, sentences=0;
+let avgJob=null, wakeLock=null, buzzed=false;
+
+function toast(t,err){const m=$('msg');m.textContent=t;m.className=err?'err':'';m.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>m.style.display='none',err?6000:2500);}
+function saveSet(){store.set('set',S);}
+
+/* ---------- Tabs ---------- */
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id==='t-'+b.dataset.t));
+});
+
+/* ---------- Einstellungen ---------- */
+function initSettings(){
+  $('sZone').value=S.zone; $('sDecl').value=S.decl; $('sTol').value=S.tol; $('sPole').value=S.pole; $('sNear').value=S.near; $('sVert').value=S.vert;
+  $('hdgMode').value=S.hdgMode; $('sortT').value=S.sort;
+  const r=store.get('recset',{prefix:'P',next:1,avg:'0'}); $('rPrefix').value=r.prefix; $('rNext').value=r.next; $('rAvg').value=r.avg;
+  const bind=(id,k,parse)=>$(id).onchange=e=>{const v=parse(e.target.value); if(v!==null&&!(typeof v==='number'&&!isFinite(v))){S[k]=v;saveSet();render();}};
+  bind('sZone','zone',v=>parseInt(v,10)); bind('sDecl','decl',v=>parseFloat(v.replace(',','.'))); bind('sTol','tol',v=>parseFloat(v.replace(',','.')));
+  bind('sPole','pole',v=>parseFloat(v.replace(',','.'))); bind('sNear','near',v=>parseFloat(v.replace(',','.'))); bind('sVert','vert',v=>parseInt(v,10));
+  $('hdgMode').onchange=e=>{S.hdgMode=e.target.value;saveSet();if(S.hdgMode==='compass')startCompass();render();};
+  $('sortT').onchange=e=>{S.sort=e.target.value;saveSet();renderTargets();};
+  const saveRec=()=>store.set('recset',{prefix:$('rPrefix').value,next:parseInt($('rNext').value,10)||1,avg:$('rAvg').value});
+  ['rPrefix','rNext','rAvg'].forEach(i=>$(i).onchange=saveRec);
+}
+
+/* ---------- Bluetooth / Web Serial ---------- */
+$('btnConn').onclick=async()=>{
+  if(port){await disconnect(true);return;}
+  if(!('serial' in navigator)){
+    toast(location.protocol!=='https:'?'Web Serial braucht HTTPS. Bitte die Seite über https:// öffnen.':'Dieser Browser kann kein Bluetooth-Seriell (Web Serial). Chrome ab 137 auf Android nötig – oder von der IT gesperrt.',true);return;
+  }
+  try{
+    const p=await navigator.serial.requestPort({allowedBluetoothServiceClassIds:['00001101-0000-1000-8000-00805f9b34fb']});
+    await openPort(p);
+  }catch(e){
+    if(e.name==='NotFoundError') toast('Kein Gerät gewählt.');
+    else if(e.name==='SecurityError') toast('Bluetooth-Zugriff hier blockiert (eingebettete Seite oder IT-Richtlinie). Seite direkt im Chrome-Tab öffnen.',true);
+    else toast('Verbindung fehlgeschlagen: '+e.message,true);
+  }
+};
+async function openPort(p){
+  stopGeo();
+  await p.open({baudRate:115200});
+  port=p; wantConn=true; source='bt';
+  try{store.set('hadPort',true);}catch(e){}
+  $('btnConn').textContent='Trennen'; $('btnConn').classList.remove('pri');
+  toast('S900+ verbunden – warte auf NMEA …');
+  keepAwake();
+  readLoop(p);
+}
+async function readLoop(p){
+  const dec=new TextDecoderStream();
+  pipeDone=p.readable.pipeTo(dec.writable).catch(()=>{});
+  reader=dec.readable.getReader();
+  let buf='';
+  try{
+    for(;;){
+      const {value,done}=await reader.read();
+      if(done) break;
+      bytes+=value.length; buf+=value;
+      let i; while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i).replace(/\r/g,''); buf=buf.slice(i+1); if(l) onLine(l);}
+      if(buf.length>8192) buf='';
+    }
+  }catch(e){}
+  try{reader.releaseLock();}catch(e){}
+  reader=null;
+  await pipeDone;
+  try{await p.close();}catch(e){}
+  if(port===p){
+    port=null; source='none'; fix=null;
+    $('btnConn').textContent='S900+ verbinden'; $('btnConn').classList.add('pri');
+    render();
+    if(wantConn){toast('Verbindung zum S900+ verloren – verbinde neu, sobald er erreichbar ist …',true); tryReconnect();}
+  }
+}
+async function disconnect(user){
+  wantConn=!user?wantConn:false;
+  if(reader){try{await reader.cancel();}catch(e){}}
+}
+async function tryReconnect(){
+  if(!wantConn||port) return;
+  try{
+    const ps=await navigator.serial.getPorts();
+    if(ps.length){await openPort(ps[0]); return;}
+  }catch(e){}
+  setTimeout(tryReconnect,4000);
+}
+if('serial' in navigator){
+  navigator.serial.addEventListener('connect',()=>{if(wantConn&&!port) tryReconnect();});
+}
+
+/* ---------- Handy-GPS (Test/Notbehelf) ---------- */
+$('btnGeo').onclick=()=>{
+  if(geoWatch!=null){stopGeo();source='none';fix=null;render();return;}
+  if(port){toast('Erst S900+ trennen.');return;}
+  if(!navigator.geolocation){toast('Kein GPS verfügbar.',true);return;}
+  source='geo'; $('btnGeo').textContent='GPS aus';
+  geoWatch=navigator.geolocation.watchPosition(pos=>{
+    const c=pos.coords;
+    fix={lat:c.latitude,lon:c.longitude,alt:c.altitude,q:1,sats:NaN,hdop:NaN,age:NaN,sig:c.accuracy,t:Date.now()};
+    if(c.heading!=null&&c.speed>0.5){course=c.heading;speed=c.speed;}
+    lastGGA=Date.now(); onFix();
+  },e=>toast('GPS: '+e.message,true),{enableHighAccuracy:true,maximumAge:0});
+  keepAwake();
+  toast('Handy-GPS aktiv (nur Meter-Genauigkeit, zum Testen).');
+};
+function stopGeo(){if(geoWatch!=null){navigator.geolocation.clearWatch(geoWatch);geoWatch=null;} $('btnGeo').textContent='Handy-GPS';}
+
+/* ---------- NMEA ---------- */
+let gst=null;
+function onLine(l){
+  if(logOn){logLines.push(l); if(logLines.length>300) logLines.splice(0,logLines.length-300);}
+  const m=NMEA.parse(l); if(!m) return;
+  sentences++;
+  if(m.typ==='GGA'){
+    if(!isFinite(m.lat)||m.q===0){fix={q:0,sats:m.sats,t:Date.now()}; lastGGA=Date.now(); onFix(); return;}
+    const sig=gst&&Date.now()-gst.t<3000&&isFinite(gst.sLat)?Math.hypot(gst.sLat,gst.sLon):null;
+    fix={lat:m.lat,lon:m.lon,alt:m.alt,q:m.q,sats:m.sats,hdop:m.hdop,age:m.age,sig,sAlt:gst?gst.sAlt:null,t:Date.now()};
+    lastGGA=Date.now(); onFix();
+  }else if(m.typ==='RMC'){
+    if(m.valid&&isFinite(m.course)&&m.speed>0.3){course=m.course;} speed=m.speed||0;
+  }else if(m.typ==='GST'){gst={...m,t:Date.now()};}
+}
+setInterval(()=>{ // Datenausfall erkennen + Log
+  if(source!=='none'&&Date.now()-lastGGA>3000&&fix){fix=null;render();}
+  if(logOn){const lg=$('log'); lg.textContent=logLines.slice(-80).join('\n'); lg.scrollTop=lg.scrollHeight;}
+  $('logInfo').textContent=`Empfangen: ${bytes} Byte, ${sentences} gültige NMEA-Sätze`+(source==='bt'&&bytes>0&&sentences===0?' – Daten kommen, aber kein NMEA: Ausgabe im S900+ prüfen.':'');
+  if(source==='bt'&&bytes===0&&port) $('cFix').textContent='warte auf Daten';
+},1000);
+$('btnLog').onclick=()=>{logOn=!logOn;$('log').hidden=!logOn;};
+$('btnClrLog').onclick=()=>{logLines=[];$('log').textContent='';};
+
+function hasPos(){return fix&&isFinite(fix.lat);}
+function onFix(){
+  if(avgJob&&hasPos()) avgJob.samples.push({...fix});
+  render();
+}
+
+/* ---------- Kompass ---------- */
+let compassStarted=false;
+function startCompass(){
+  if(compassStarted) return; compassStarted=true;
+  const h=e=>{
+    let hd=null;
+    if(e.webkitCompassHeading!=null) hd=e.webkitCompassHeading;
+    else if(e.absolute&&e.alpha!=null) hd=360-e.alpha;
+    if(hd==null) return;
+    const so=(screen.orientation&&screen.orientation.angle)||0;
+    compass=((hd+so)%360+360)%360; compassAt=Date.now();
+    scheduleRender();
+  };
+  if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){
+    DeviceOrientationEvent.requestPermission().then(r=>{if(r==='granted')addEventListener('deviceorientation',h);}).catch(()=>{});
+  }
+  addEventListener('deviceorientationabsolute',h);
+}
+let rq=false; function scheduleRender(){if(rq)return;rq=true;requestAnimationFrame(()=>{rq=false;renderNav();});}
+function heading(){
+  if(S.hdgMode==='north') return {h:0,src:'Norden oben'};
+  if(S.hdgMode==='course'){
+    if(course!=null&&speed>0.3) return {h:course,src:'Laufrichtung (GNSS)'};
+    return {h:null,src:'Laufrichtung: erst ein paar Schritte gehen'};
+  }
+  if(compass!=null&&Date.now()-compassAt<3000) return {h:(compass+S.decl+360)%360,src:'Handy-Kompass (Missweisung '+fmt(S.decl,1)+'°)'};
+  return {h:null,src:'Kein Kompass – zeige Norden oben'};
+}
+
+/* ---------- Wake Lock ---------- */
+async function keepAwake(){try{if('wakeLock' in navigator&&!wakeLock){wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>wakeLock=null);}}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&source!=='none')keepAwake();});
+
+/* ---------- Anzeige ---------- */
+function render(){renderStatus();renderNav();renderTargetsLite();}
+function renderStatus(){
+  $('cSrc').textContent=source==='bt'?'S900+':source==='geo'?'Handy-GPS':'nicht verbunden';
+  $('cSrc').className='chip'+(source==='bt'?' ok':source==='geo'?' warn':'');
+  const cf=$('cFix');
+  if(!fix){cf.textContent=source==='none'?'kein Fix':'keine Daten';cf.className='chip bad';}
+  else{
+    cf.textContent=source==='geo'?'Handy':(NMEA.Q[fix.q]||('Q'+fix.q));
+    cf.className='chip '+(fix.q===4&&source==='bt'?'ok':fix.q===5||fix.q===2||source==='geo'?'warn':'bad');
+  }
+  $('cSat').textContent='Sat '+(fix&&isFinite(fix.sats)?fix.sats:'–');
+  $('cAcc').textContent=fix&&fix.sig!=null?'± '+fmt(fix.sig,fix.sig<1?3:1)+' m':fix&&isFinite(fix.hdop)?'HDOP '+fmt(fix.hdop,1):'± –';
+  $('cAge').textContent='Korr '+(fix&&isFinite(fix.age)?fmt(fix.age,0)+' s':'–');
+  if(hasPos()){
+    const u=GEO.toUTM(fix.lat,fix.lon,S.zone);
+    $('coord').textContent=`Z${S.zone}  E ${fmt(u.E,3)} · N ${fmt(u.N,3)} · H ${fmt(fix.alt!=null&&isFinite(fix.alt)?fix.alt-S.pole:null,3)}`;
+  }else $('coord').textContent='E – · N – · H –';
+}
+function selTarget(){return sel!=null?targets[sel]:null;}
+function renderNav(){
+  const t=selTarget(), g=$('gfx');
+  const hd=heading(); $('hdgInfo').textContent=hd.src;
+  if(!t){$('tname').textContent='Kein Ziel gewählt';$('dist').textContent='–';$('comp').textContent='KML laden und Punkt antippen';$('dh').textContent='';g.innerHTML=rose(0);$('dist').classList.remove('inz');return;}
+  $('tname').textContent=t.name+(t.done?' ✓':'');
+  if(!hasPos()){$('dist').textContent='–';$('comp').textContent=source==='none'?'S900+ verbinden':'warte auf Position …';$('dh').textContent='';g.innerHTML=rose(0);return;}
+  const d=GEO.delta(fix,t);
+  const h=hd.h==null?0:hd.h;
+  const rel=((d.brg-h)%360+360)%360;
+  const inZ=d.d<=S.tol;
+  $('dist').textContent=d.d>=100?fmt(d.d,0)+' m':d.d>=10?fmt(d.d,1)+' m':fmt(d.d,2)+' m';
+  $('dist').classList.toggle('inz',inZ);
+  if(hd.h==null||S.hdgMode==='north'){
+    $('comp').textContent=`${fmt(Math.abs(d.dN),2)} m ${d.dN>=0?'Nord':'Süd'}  ·  ${fmt(Math.abs(d.dE),2)} m ${d.dE>=0?'Ost':'West'}`;
+  }else{
+    const r=rel*Math.PI/180, fw=d.d*Math.cos(r), rt=d.d*Math.sin(r);
+    $('comp').textContent=`${fmt(Math.abs(fw),2)} m ${fw>=0?'vor':'zurück'}  ·  ${fmt(Math.abs(rt),2)} m ${rt>=0?'rechts':'links'}`;
+  }
+  if(t.h!=null&&fix.alt!=null&&isFinite(fix.alt)){
+    const dz=t.h-(fix.alt-S.pole);
+    $('dh').textContent=`Höhe: ${fmt(Math.abs(dz),3)} m ${dz>=0?'auftragen':'abtragen'} (Soll ${fmt(t.h,3)})`;
+  }else $('dh').textContent='';
+  if(inZ&&!buzzed){try{navigator.vibrate&&navigator.vibrate([120,60,120]);}catch(e){} buzzed=true;}
+  if(!inZ&&d.d>S.tol*2) buzzed=false;
+  g.innerHTML=d.d>S.near?arrowSVG(rel,h):bullseye(d,h,inZ);
+}
+function rose(h){
+  // Nordmarke am Rand, gedreht nach Ausrichtung
+  return `<circle r="92" fill="none" stroke="#2c343d" stroke-width="2"/>
+  <g transform="rotate(${-h})"><text x="0" y="-78" fill="#ff5a52" font-size="14" font-weight="700" text-anchor="middle">N</text>
+  <path d="M0,-96 L5,-88 L-5,-88Z" fill="#ff5a52"/></g>`;
+}
+function arrowSVG(rel,h){
+  return rose(h)+`<g transform="rotate(${rel})">
+    <path d="M0,-80 L34,-14 L12,-20 L12,62 L-12,62 L-12,-20 L-34,-14Z" fill="#3fa7ff" stroke="#bfe0ff" stroke-width="2" stroke-linejoin="round"/></g>
+    <circle r="5" fill="#e8edf2"/>`;
+}
+function bullseye(d,h,inZ){
+  const R=88/S.near; // px pro m
+  const rings=[];
+  const steps=S.near<=1?[0.1,0.25,0.5,1]:S.near<=2?[0.1,0.5,1,2]:[0.5,1,2,S.near];
+  for(const s of steps) if(s<=S.near) rings.push(`<circle r="${s*R}" fill="none" stroke="#2c343d" stroke-width="1.5"/><text x="${s*R*0.71+3}" y="${-s*R*0.71-3}" fill="#93a0ad" font-size="9">${fmt(s,s<1?2:0)} m</text>`);
+  const r=(d.brg-h)*Math.PI/180;
+  const x=Math.sin(r)*d.d*R, y=-Math.cos(r)*d.d*R;
+  const tolR=Math.max(S.tol*R,3);
+  return rose(h)+rings.join('')+
+    `<line x1="-95" y1="0" x2="95" y2="0" stroke="#2c343d"/><line x1="0" y1="-95" x2="0" y2="95" stroke="#2c343d"/>
+     <circle cx="${x}" cy="${y}" r="${tolR}" fill="${inZ?'#2ecc7155':'#3fa7ff33'}" stroke="${inZ?'#2ecc71':'#3fa7ff'}"/>
+     <circle cx="${x}" cy="${y}" r="5" fill="${inZ?'#2ecc71':'#3fa7ff'}"/>
+     <path d="M0,-9 L7,7 L0,3 L-7,7Z" fill="#e8edf2"/>`;
+}
+
+/* ---------- Absteckziele ---------- */
+$('btnKml').onclick=()=>$('fileKml').click();
+$('fileKml').onchange=async e=>{
+  let n=0;
+  for(const f of e.target.files){
+    try{
+      const pts=KML.parse(await f.text(),{vertices:S.vert===1,zone:S.zone});
+      pts.forEach(p=>targets.push({name:p.name,lat:p.lat,lon:p.lon,h:p.h,done:false}));
+      n+=pts.length;
+    }catch(err){toast(f.name+': '+err.message,true);}
+  }
+  e.target.value='';
+  store.set('targets',targets);
+  toast(n+' Punkte geladen.');
+  if(sel==null&&targets.length) selectT(0); else renderTargets();
+};
+$('btnClrT').onclick=()=>{if(!targets.length||!confirm('Alle Absteckziele entfernen?'))return;targets=[];sel=null;store.set('targets',targets);store.set('sel',sel);renderTargets();renderNav();};
+function selectT(i){sel=i;buzzed=false;store.set('sel',sel);renderTargets();renderNav();scrollTo({top:0,behavior:'smooth'});}
+function orderT(){
+  const idx=targets.map((t,i)=>i);
+  if(S.sort==='dist'&&hasPos()) idx.sort((a,b)=>GEO.delta(fix,targets[a]).d-GEO.delta(fix,targets[b]).d);
+  return idx;
+}
+function renderTargets(){
+  const L=$('tList'); L.innerHTML='';
+  const done=targets.filter(t=>t.done).length;
+  $('tCount').textContent=targets.length?`${targets.length} Punkte, ${done} abgesteckt.`:'Keine Punkte geladen.';
+  for(const i of orderT()){
+    const t=targets[i], el=document.createElement('div');
+    el.className='item'+(i===sel?' sel':'')+(t.done?' done':'');
+    el.innerHTML=`<span class="nm"></span><span class="d" data-i="${i}"></span>`;
+    el.querySelector('.nm').textContent=t.name;
+    el.onclick=()=>selectT(i);
+    L.appendChild(el);
+  }
+  renderTargetsLite();
+}
+let lastLite=0;
+function renderTargetsLite(){
+  if(Date.now()-lastLite<1000) return; lastLite=Date.now();
+  document.querySelectorAll('#tList .d').forEach(s=>{
+    const t=targets[+s.dataset.i];
+    s.textContent=hasPos()&&t?(d=>d>=10?fmt(d,1)+' m':fmt(d,2)+' m')(GEO.delta(fix,t).d):'';
+  });
+}
+$('btnDone').onclick=()=>{const t=selTarget();if(!t)return;t.done=!t.done;store.set('targets',targets);renderTargets();renderNav();};
+$('btnNext').onclick=()=>{
+  if(!targets.length) return;
+  let cand=targets.map((t,i)=>i).filter(i=>!targets[i].done&&i!==sel);
+  if(!cand.length){toast('Alle Punkte abgesteckt.');return;}
+  if(hasPos()) cand.sort((a,b)=>GEO.delta(fix,targets[a]).d-GEO.delta(fix,targets[b]).d);
+  else cand.sort((a,b)=>((a-(sel??-1))+targets.length)%targets.length-((b-(sel??-1))+targets.length)%targets.length);
+  selectT(cand[0]);
+};
+
+/* ---------- Aufnahme ---------- */
+$('btnRec').onclick=()=>{
+  if(avgJob) return;
+  if(!hasPos()){toast('Keine Position.',true);return;}
+  if(source==='bt'&&fix.q!==4&&!confirm(`Kein RTK-Fix (aktuell: ${NMEA.Q[fix.q]||fix.q}). Trotzdem speichern?`)) return;
+  const secs=parseInt($('rAvg').value,10)||0;
+  if(!secs){savePoint([{...fix}]);return;}
+  avgJob={samples:[],end:Date.now()+secs*1000};
+  $('btnRec').disabled=true;
+  const tick=()=>{
+    const left=Math.ceil((avgJob.end-Date.now())/1000);
+    if(left>0){$('btnRec').textContent=`Mittele … ${left} s (${avgJob.samples.length} Epochen)`;setTimeout(tick,250);return;}
+    const s=avgJob.samples; avgJob=null;
+    $('btnRec').disabled=false; $('btnRec').textContent='Punkt speichern';
+    if(!s.length){toast('Keine Epochen empfangen.',true);return;}
+    savePoint(s);
+  };
+  tick();
+};
+function savePoint(s){
+  const lat=s.reduce((a,b)=>a+b.lat,0)/s.length, lon=s.reduce((a,b)=>a+b.lon,0)/s.length;
+  const alts=s.filter(x=>x.alt!=null&&isFinite(x.alt));
+  const alt=alts.length?alts.reduce((a,b)=>a+b.alt,0)/alts.length-S.pole:null;
+  let spread=null;
+  if(s.length>1){const c={lat,lon};spread=Math.sqrt(s.reduce((a,b)=>{const d=GEO.delta(c,b);return a+d.d*d.d;},0)/s.length);}
+  const last=s[s.length-1];
+  const qs=Math.min(...s.map(x=>x.q===4?0:x.q===5?1:2)); const worstQ=s.some(x=>x.q!==last.q)?Math.max(...s.map(x=>x.q===4?0:x.q===5?1:x.q===2?2:3)):null;
+  const zone=S.zone, u=GEO.toUTM(lat,lon,zone);
+  const nr=parseInt($('rNext').value,10)||1;
+  const p={name:$('rPrefix').value+nr, code:$('rCode').value.trim(), lat, lon, h:alt, E:u.E, N:u.N, zone,
+    q:last.q, mixed:worstQ!=null, sats:last.sats, sig:spread??last.sig??null, n:s.length,
+    time:new Date().toLocaleString('de-DE'), src:source};
+  recorded.push(p); store.set('rec',recorded);
+  $('rNext').value=nr+1; store.set('recset',{prefix:$('rPrefix').value,next:nr+1,avg:$('rAvg').value});
+  try{navigator.vibrate&&navigator.vibrate(80);}catch(e){}
+  $('recInfo').textContent=`${p.name} gespeichert: E ${fmt(u.E,3)} N ${fmt(u.N,3)}`+(s.length>1?` · ${s.length} Epochen, Streuung ${fmt(spread,3)} m`:'')+(p.mixed?' · Achtung: Fix-Status wechselte während der Mittelung':'');
+  renderRec();
+}
+function renderRec(){
+  const L=$('rList'); L.innerHTML='';
+  $('rCount').textContent=recorded.length?recorded.length+' Punkte aufgenommen.':'Noch keine Punkte aufgenommen.';
+  recorded.slice().reverse().forEach((p,ri)=>{
+    const i=recorded.length-1-ri, el=document.createElement('div'); el.className='item';
+    const u=GEO.toUTM(p.lat,p.lon,S.zone);
+    el.innerHTML=`<div><div class="nm"></div><div class="mut">E ${fmt(u.E,3)} · N ${fmt(u.N,3)} · H ${fmt(p.h,3)}<br>${NMEA.Q[p.q]||p.q}${p.sig!=null?' · ± '+fmt(p.sig,3)+' m':''}${p.n>1?' · '+p.n+' Ep.':''}</div></div><button style="flex:0 0 auto">✕</button>`;
+    el.querySelector('.nm').textContent=p.name+(p.code?' – '+p.code:'');
+    el.querySelector('button').onclick=()=>{if(confirm(p.name+' löschen?')){recorded.splice(i,1);store.set('rec',recorded);renderRec();}};
+    L.appendChild(el);
+  });
+}
+$('btnClrR').onclick=()=>{if(!recorded.length||!confirm('Alle aufgenommenen Punkte löschen? Vorher exportieren!'))return;recorded=[];store.set('rec',recorded);renderRec();};
+$('btnRecToT').onclick=()=>{if(!recorded.length)return;recorded.forEach(p=>targets.push({name:p.name,lat:p.lat,lon:p.lon,h:p.h,done:false}));store.set('targets',targets);renderTargets();toast(recorded.length+' Punkte als Ziele übernommen.');};
+function stamp(){const d=new Date(),z=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}`;}
+function download(name,text,type){
+  const b=new Blob([text],{type});
+  const f=new File([b],name,{type});
+  if(navigator.canShare&&navigator.canShare({files:[f]})){navigator.share({files:[f],title:name}).catch(()=>dl());}else dl();
+  function dl(){const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);}
+}
+$('btnExpKml').onclick=()=>{
+  if(!recorded.length){toast('Keine Punkte.');return;}
+  const pts=recorded.map(p=>{const u=GEO.toUTM(p.lat,p.lon,S.zone);return {...p,E:u.E,N:u.N,zone:S.zone};});
+  download(`Aufnahme_${stamp()}.kml`,KML.build(pts,'Aufnahme '+stamp()),'application/vnd.google-earth.kml+xml');
+};
+$('btnExpCsv').onclick=()=>{
+  if(!recorded.length){toast('Keine Punkte.');return;}
+  const c=v=>v==null||!isFinite(v)?'':String(v).replace('.',',');
+  const rows=[`Name;Code;Ost (UTM${S.zone});Nord;Höhe;Breite;Länge;Fix;Satelliten;Sigma/Streuung (m);Epochen;Zeit`];
+  for(const p of recorded){
+    const u=GEO.toUTM(p.lat,p.lon,S.zone);
+    rows.push([p.name,p.code||'',c(u.E.toFixed(3)),c(u.N.toFixed(3)),c(p.h!=null?p.h.toFixed(3):null),c(p.lat.toFixed(9)),c(p.lon.toFixed(9)),NMEA.Q[p.q]||p.q,isFinite(p.sats)?p.sats:'',c(p.sig!=null?p.sig.toFixed(3):null),p.n,p.time].map(v=>String(v).includes(';')?'"'+v+'"':v).join(';'));
+  }
+  download(`Aufnahme_${stamp()}.csv`,'﻿'+rows.join('\r\n')+'\r\n','text/csv');
+};
+
+/* ---------- Start ---------- */
+initSettings();
+if(sel!=null&&!targets[sel]) sel=null;
+renderTargets(); renderRec(); render();
+if(S.hdgMode==='compass') startCompass();
+if('serviceWorker' in navigator&&location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
+if(!('serial' in navigator)) $('hdgInfo').textContent='Hinweis: Web Serial nicht verfügbar – S900+ kann hier nicht verbunden werden.';
+</script>
+</body>
+</html>
