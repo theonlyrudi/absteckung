@@ -6,4 +6,5 @@ Punkte aus KML abstecken (Pfeil-/Zielscheiben-Führung) und aktuelle Positionen 
 App: https://theonlyrudi.github.io/absteckung/
 
 Voraussetzungen: Chrome ≥ 137 auf Android, S900+ in Android gekoppelt, NMEA-Ausgabe (GGA, RMC, GST) über Bluetooth aktiv.
+Optionale Hintergrundkarte (basemap.de, Luftbild, OSM) mit Leaflet 1.9.4 (lokal eingebunden); angesehene Kacheln werden offline gespeichert.
 Bei Änderungen an der App in `sw.js` die `VERSION` hochzählen.

@@ -7,6 +7,8 @@
 <title>S900+ Absteckung</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="leaflet.css">
+<script src="leaflet.js"></script>
 <style>
 :root{--bg:#14181d;--panel:#1d232a;--line:#2c343d;--txt:#e8edf2;--mut:#93a0ad;--acc:#3fa7ff;--ok:#2ecc71;--warn:#f5a623;--bad:#ff5a52;}
 *{box-sizing:border-box}
@@ -45,7 +47,14 @@ section.on{display:block}
 #dist{font-size:44px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
 #comp{font-size:17px;font-variant-numeric:tabular-nums;margin-top:4px}
 #dh{font-size:15px;color:var(--mut);margin-top:2px}
-svg#gfx{width:min(86vw,360px);height:min(86vw,360px);display:block;margin:6px auto}
+#stage{position:relative;width:min(86vw,360px);height:min(86vw,360px);margin:6px auto;border-radius:50%;overflow:hidden}
+#map{position:absolute;inset:0;display:none;background:#0f1317}
+#stage.map #map{display:block}
+svg#gfx{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none}
+#stage.map #gfx [stroke="#2c343d"]{stroke:rgba(255,255,255,.6)}
+#stage.map #gfx text{fill:#fff;paint-order:stroke;stroke:#000;stroke-width:3px}
+#stage.map #gfx .arr{fill-opacity:.7}
+#attr{font-size:10px;color:var(--mut);min-height:12px}
 .hint{font-size:12px;color:var(--mut)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 label{font-size:13px;color:var(--mut);display:block;margin-bottom:3px}
@@ -83,12 +92,19 @@ pre#log{font-size:11px;max-height:30vh;overflow:auto;background:#0f1317;padding:
     <div id="dist">–</div>
     <div id="comp"></div>
     <div id="dh"></div>
-    <svg id="gfx" viewBox="-100 -100 200 200"></svg>
+    <div id="stage"><div id="map"></div><svg id="gfx" viewBox="-100 -100 200 200"></svg></div>
+    <div id="attr"></div>
     <div class="row">
       <select id="hdgMode">
         <option value="compass">Ausrichtung: Handy-Kompass</option>
         <option value="course">Ausrichtung: Laufrichtung (GNSS)</option>
         <option value="north">Norden oben</option>
+      </select>
+      <select id="mapMode">
+        <option value="off">Karte: aus</option>
+        <option value="basemap">Karte: basemap.de</option>
+        <option value="luftbild">Karte: Luftbild</option>
+        <option value="osm">Karte: OpenStreetMap</option>
       </select>
     </div>
     <div class="row" style="margin-top:8px">
@@ -290,6 +306,25 @@ const KML = (() => {
     }
     return out.map(p=>({...p, h:isFinite(p.h)&&p.h!==0?p.h:null}));
   }
+  function shapes(xml){
+    const doc=new DOMParser().parseFromString(xml,'application/xml');
+    const out=[], pms=doc.getElementsByTagName('Placemark');
+    for(let i=0;i<pms.length;i++){
+      const pm=pms[i], name=txt(pm,'name');
+      const polys=pm.getElementsByTagName('Polygon');
+      for(let k=0;k<polys.length;k++){
+        const ob=polys[k].getElementsByTagName('outerBoundaryIs')[0]||polys[k];
+        const c=coords(txt(ob,'coordinates')).map(p=>[p[1],p[0]]);
+        if(c.length>2) out.push({name,type:'poly',c});
+      }
+      const ls=pm.getElementsByTagName('LineString');
+      for(let k=0;k<ls.length;k++){
+        const c=coords(txt(ls[k],'coordinates')).map(p=>[p[1],p[0]]);
+        if(c.length>1) out.push({name,type:'line',c});
+      }
+    }
+    return out;
+  }
   const esc=s=>String(s).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
   function build(points, title){
     const pm=points.map(p=>`  <Placemark>
@@ -314,7 +349,7 @@ ${pm}
 </kml>
 `;
   }
-  return {parse, build};
+  return {parse, build, shapes};
 })();
 </script>
 
@@ -326,8 +361,9 @@ const store={
   get(k,def){try{const v=localStorage.getItem('s900_'+k);return v?JSON.parse(v):def;}catch(e){return def;}},
   set(k,v){try{localStorage.setItem('s900_'+k,JSON.stringify(v));}catch(e){}}
 };
-const S=Object.assign({zone:33,decl:5.0,tol:0.05,pole:0,near:2,vert:1,hdgMode:'compass',sort:'file'},store.get('set',{}));
-let targets=store.get('targets',[]);       // {name,lat,lon,h,done}
+const S=Object.assign({map:'off',zone:33,decl:5.0,tol:0.05,pole:0,near:2,vert:1,hdgMode:'compass',sort:'file'},store.get('set',{}));
+let targets=store.get('targets',[]);
+let shapes=store.get('shapes',[]);       // {name,lat,lon,h,done}
 let recorded=store.get('rec',[]);
 let sel=store.get('sel',null);
 let fix=null, lastGGA=0, course=null, speed=0;
@@ -348,12 +384,13 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
 /* ---------- Einstellungen ---------- */
 function initSettings(){
   $('sZone').value=S.zone; $('sDecl').value=S.decl; $('sTol').value=S.tol; $('sPole').value=S.pole; $('sNear').value=S.near; $('sVert').value=S.vert;
-  $('hdgMode').value=S.hdgMode; $('sortT').value=S.sort;
+  $('hdgMode').value=S.hdgMode; $('mapMode').value=S.map; $('sortT').value=S.sort;
   const r=store.get('recset',{prefix:'P',next:1,avg:'0'}); $('rPrefix').value=r.prefix; $('rNext').value=r.next; $('rAvg').value=r.avg;
   const bind=(id,k,parse)=>$(id).onchange=e=>{const v=parse(e.target.value); if(v!==null&&!(typeof v==='number'&&!isFinite(v))){S[k]=v;saveSet();render();}};
   bind('sZone','zone',v=>parseInt(v,10)); bind('sDecl','decl',v=>parseFloat(v.replace(',','.'))); bind('sTol','tol',v=>parseFloat(v.replace(',','.')));
   bind('sPole','pole',v=>parseFloat(v.replace(',','.'))); bind('sNear','near',v=>parseFloat(v.replace(',','.'))); bind('sVert','vert',v=>parseInt(v,10));
   $('hdgMode').onchange=e=>{S.hdgMode=e.target.value;saveSet();if(S.hdgMode==='compass')startCompass();render();};
+  $('mapMode').onchange=e=>{S.map=e.target.value;saveSet();setBasemap();};
   $('sortT').onchange=e=>{S.sort=e.target.value;saveSet();renderTargets();};
   const saveRec=()=>store.set('recset',{prefix:$('rPrefix').value,next:parseInt($('rNext').value,10)||1,avg:$('rAvg').value});
   ['rPrefix','rNext','rAvg'].forEach(i=>$(i).onchange=saveRec);
@@ -506,7 +543,7 @@ async function keepAwake(){try{if('wakeLock' in navigator&&!wakeLock){wakeLock=a
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&source!=='none')keepAwake();});
 
 /* ---------- Anzeige ---------- */
-function render(){renderStatus();renderNav();renderTargetsLite();}
+function render(){renderStatus();renderNav();renderTargetsLite();updateMap();}
 function renderStatus(){
   $('cSrc').textContent=source==='bt'?'S900+':source==='geo'?'Handy-GPS':'nicht verbunden';
   $('cSrc').className='chip'+(source==='bt'?' ok':source==='geo'?' warn':'');
@@ -528,9 +565,11 @@ function selTarget(){return sel!=null?targets[sel]:null;}
 function renderNav(){
   const t=selTarget(), g=$('gfx');
   const hd=heading(); $('hdgInfo').textContent=hd.src;
-  if(!t){$('tname').textContent='Kein Ziel gewählt';$('dist').textContent='–';$('comp').textContent='KML laden und Punkt antippen';$('dh').textContent='';g.innerHTML=rose(0);$('dist').classList.remove('inz');return;}
+  const hh=hd.h==null?0:hd.h;
+  $('map').style.transform=`rotate(${-hh}deg)`;
+  if(!t){$('tname').textContent='Kein Ziel gewählt';$('dist').textContent='–';$('comp').textContent='KML laden und Punkt antippen';$('dh').textContent='';g.innerHTML=rose(hh);$('dist').classList.remove('inz');return;}
   $('tname').textContent=t.name+(t.done?' ✓':'');
-  if(!hasPos()){$('dist').textContent='–';$('comp').textContent=source==='none'?'S900+ verbinden':'warte auf Position …';$('dh').textContent='';g.innerHTML=rose(0);return;}
+  if(!hasPos()){$('dist').textContent='–';$('comp').textContent=source==='none'?'S900+ verbinden':'warte auf Position …';$('dh').textContent='';g.innerHTML=rose(hh);return;}
   const d=GEO.delta(fix,t);
   const h=hd.h==null?0:hd.h;
   const rel=((d.brg-h)%360+360)%360;
@@ -559,14 +598,14 @@ function rose(h){
 }
 function arrowSVG(rel,h){
   return rose(h)+`<g transform="rotate(${rel})">
-    <path d="M0,-80 L34,-14 L12,-20 L12,62 L-12,62 L-12,-20 L-34,-14Z" fill="#3fa7ff" stroke="#bfe0ff" stroke-width="2" stroke-linejoin="round"/></g>
+    <path class="arr" d="M0,-80 L34,-14 L12,-20 L12,62 L-12,62 L-12,-20 L-34,-14Z" fill="#3fa7ff" stroke="#bfe0ff" stroke-width="2" stroke-linejoin="round"/></g>
     <circle r="5" fill="#e8edf2"/>`;
 }
 function bullseye(d,h,inZ){
   const R=88/S.near; // px pro m
   const rings=[];
   const steps=S.near<=1?[0.1,0.25,0.5,1]:S.near<=2?[0.1,0.5,1,2]:[0.5,1,2,S.near];
-  for(const s of steps) if(s<=S.near) rings.push(`<circle r="${s*R}" fill="none" stroke="#2c343d" stroke-width="1.5"/><text x="${s*R*0.71+3}" y="${-s*R*0.71-3}" fill="#93a0ad" font-size="9">${fmt(s,s<1?2:0)} m</text>`);
+  for(const s of steps) if(s<=S.near) rings.push(`<circle r="${s*R}" fill="none" stroke="#2c343d" stroke-width="1.5"/>${s*R>=30?`<text x="${s*R-2}" y="-3" text-anchor="end" fill="#93a0ad" font-size="9">${fmt(s,s<1?2:0)} m</text>`:''}`);
   const r=(d.brg-h)*Math.PI/180;
   const x=Math.sin(r)*d.d*R, y=-Math.cos(r)*d.d*R;
   const tolR=Math.max(S.tol*R,3);
@@ -577,23 +616,99 @@ function bullseye(d,h,inZ){
      <path d="M0,-9 L7,7 L0,3 L-7,7Z" fill="#e8edf2"/>`;
 }
 
+/* ---------- Hintergrundkarte ---------- */
+const BASEMAPS={
+  basemap:{url:'https://sgx.geodatenzentrum.de/wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_farbe/default/GLOBAL_WEBMERCATOR/{z}/{y}/{x}.png',nz:18,attr:'© GeoBasis-DE / BKG – basemap.de'},
+  luftbild:{url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',nz:19,attr:'Luftbild © Esri, Maxar, Earthstar Geographics'},
+  osm:{url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',nz:19,attr:'© OpenStreetMap-Mitwirkende'}
+};
+let map=null, tiles=null, mL={};
+function ensureMap(){
+  if(map||typeof L==='undefined') return !!map;
+  map=L.map('map',{zoomControl:false,attributionControl:false,zoomSnap:0,zoomAnimation:false,fadeAnimation:false,markerZoomAnimation:false,
+    dragging:false,touchZoom:false,scrollWheelZoom:false,doubleClickZoom:false,boxZoom:false,keyboard:false,tap:false,maxZoom:25,minZoom:2});
+  map.setView([52.4,13.6],8);
+  mL.shapes=L.layerGroup().addTo(map); mL.rec=L.layerGroup().addTo(map); mL.targets=L.layerGroup().addTo(map);
+  mL.line=L.polyline([],{color:'#ffb020',weight:2,dashArray:'6 6',interactive:false}).addTo(map);
+  mL.acc=L.circle([0,0],{radius:0,color:'#fff',weight:1,fillColor:'#3fa7ff',fillOpacity:.15,interactive:false});
+  mL.me=L.circleMarker([0,0],{radius:6,color:'#fff',weight:2,fillColor:'#3fa7ff',fillOpacity:1,interactive:false});
+  return true;
+}
+function setBasemap(){
+  const st=$('stage');
+  if(S.map==='off'||!BASEMAPS[S.map]){st.classList.remove('map');$('attr').textContent='';return;}
+  if(!ensureMap()){toast('Kartenbibliothek nicht geladen.',true);return;}
+  st.classList.add('map');
+  const b=BASEMAPS[S.map];
+  if(tiles) map.removeLayer(tiles);
+  tiles=L.tileLayer(b.url,{maxNativeZoom:b.nz,maxZoom:25}).addTo(map);
+  tiles.bringToBack();
+  $('attr').textContent=b.attr+' · Karte braucht Internet';
+  map.invalidateSize(); drawFeatures(); updateMap();
+}
+function drawFeatures(){
+  if(!map) return;
+  mL.shapes.clearLayers(); mL.targets.clearLayers(); mL.rec.clearLayers();
+  for(const s of shapes){
+    (s.type==='poly'?L.polygon(s.c,{color:'#ffd400',weight:2,fillOpacity:.08,interactive:false}):L.polyline(s.c,{color:'#ffd400',weight:2,interactive:false})).addTo(mL.shapes);
+  }
+  recorded.forEach(p=>L.circleMarker([p.lat,p.lon],{radius:3,color:'#c77dff',fillColor:'#c77dff',fillOpacity:1,weight:1,interactive:false}).addTo(mL.rec));
+  targets.forEach((t,i)=>{
+    const on=i===sel;
+    L.circleMarker([t.lat,t.lon],{radius:on?7:4,color:on?'#fff':'#000',weight:on?3:1,fillColor:on?'#ff8c00':t.done?'#2ecc71':'#3fa7ff',fillOpacity:1,interactive:false}).addTo(mL.targets);
+  });
+  mL.targets.eachLayer(l=>l.bringToFront&&l.bringToFront());
+}
+function updateMap(){
+  if(!map||S.map==='off') return;
+  const px=$('stage').clientWidth; if(!px) return;
+  const u=px/200; // Bildschirmpixel je SVG-Einheit
+  const t=selTarget(), pos=hasPos()?fix:null;
+  let c=null, mpp=null;
+  if(t&&pos){
+    const d=GEO.delta(pos,t).d; c=pos;
+    mpp=d>S.near?d/(80*u):S.near/(88*u); // passt exakt zu Pfeilspitze bzw. Zielscheibe
+  }else if(t){c=t; mpp=0.3;}
+  else{
+    const pts=[]; shapes.forEach(s=>s.c.forEach(p=>pts.push({lat:p[0],lon:p[1]}))); targets.forEach(p=>pts.push(p));
+    if(pts.length){
+      let a=90,b=-90,cc=180,dd=-180; pts.forEach(p=>{a=Math.min(a,p.lat);b=Math.max(b,p.lat);cc=Math.min(cc,p.lon);dd=Math.max(dd,p.lon);});
+      c={lat:(a+b)/2,lon:(cc+dd)/2};
+      const m=Math.max(5,...pts.map(p=>GEO.delta(c,p).d)); mpp=m/(88*u);
+    }else if(pos){c=pos; mpp=0.3;}
+  }
+  if(!c) return;
+  const z=Math.min(25,Math.max(2,Math.log2(156543.03392*Math.cos(c.lat*Math.PI/180)/mpp)));
+  map.setView([c.lat,c.lon],z,{animate:false});
+  mL.line.setLatLngs(t&&pos?[[pos.lat,pos.lon],[t.lat,t.lon]]:[]);
+  if(pos){
+    mL.me.setLatLng([pos.lat,pos.lon]); if(!map.hasLayer(mL.me)) mL.me.addTo(map);
+    const r=pos.sig!=null?pos.sig:0;
+    mL.acc.setLatLng([pos.lat,pos.lon]).setRadius(r); if(r>0&&!map.hasLayer(mL.acc)) mL.acc.addTo(map); if(!(r>0)&&map.hasLayer(mL.acc)) map.removeLayer(mL.acc);
+    mL.me.bringToFront();
+  }else{ if(map.hasLayer(mL.me)) map.removeLayer(mL.me); if(map.hasLayer(mL.acc)) map.removeLayer(mL.acc); }
+}
+addEventListener('resize',()=>{if(map){map.invalidateSize();updateMap();}});
+
 /* ---------- Absteckziele ---------- */
 $('btnKml').onclick=()=>$('fileKml').click();
 $('fileKml').onchange=async e=>{
   let n=0;
   for(const f of e.target.files){
     try{
-      const pts=KML.parse(await f.text(),{vertices:S.vert===1,zone:S.zone});
+      const xml=await f.text();
+      const pts=KML.parse(xml,{vertices:S.vert===1,zone:S.zone});
+      shapes.push(...KML.shapes(xml));
       pts.forEach(p=>targets.push({name:p.name,lat:p.lat,lon:p.lon,h:p.h,done:false}));
       n+=pts.length;
     }catch(err){toast(f.name+': '+err.message,true);}
   }
   e.target.value='';
-  store.set('targets',targets);
+  store.set('targets',targets); store.set('shapes',shapes);
   toast(n+' Punkte geladen.');
   if(sel==null&&targets.length) selectT(0); else renderTargets();
 };
-$('btnClrT').onclick=()=>{if(!targets.length||!confirm('Alle Absteckziele entfernen?'))return;targets=[];sel=null;store.set('targets',targets);store.set('sel',sel);renderTargets();renderNav();};
+$('btnClrT').onclick=()=>{if(!targets.length||!confirm('Alle Absteckziele entfernen?'))return;targets=[];shapes=[];sel=null;store.set('targets',targets);store.set('shapes',shapes);store.set('sel',sel);renderTargets();renderNav();};
 function selectT(i){sel=i;buzzed=false;store.set('sel',sel);renderTargets();renderNav();scrollTo({top:0,behavior:'smooth'});}
 function orderT(){
   const idx=targets.map((t,i)=>i);
@@ -613,6 +728,7 @@ function renderTargets(){
     L.appendChild(el);
   }
   renderTargetsLite();
+  drawFeatures(); updateMap();
 }
 let lastLite=0;
 function renderTargetsLite(){
@@ -664,7 +780,7 @@ function savePoint(s){
   const p={name:$('rPrefix').value+nr, code:$('rCode').value.trim(), lat, lon, h:alt, E:u.E, N:u.N, zone,
     q:last.q, mixed:worstQ!=null, sats:last.sats, sig:spread??last.sig??null, n:s.length,
     time:new Date().toLocaleString('de-DE'), src:source};
-  recorded.push(p); store.set('rec',recorded);
+  recorded.push(p); store.set('rec',recorded); drawFeatures();
   $('rNext').value=nr+1; store.set('recset',{prefix:$('rPrefix').value,next:nr+1,avg:$('rAvg').value});
   try{navigator.vibrate&&navigator.vibrate(80);}catch(e){}
   $('recInfo').textContent=`${p.name} gespeichert: E ${fmt(u.E,3)} N ${fmt(u.N,3)}`+(s.length>1?` · ${s.length} Epochen, Streuung ${fmt(spread,3)} m`:'')+(p.mixed?' · Achtung: Fix-Status wechselte während der Mittelung':'');
@@ -710,7 +826,7 @@ $('btnExpCsv').onclick=()=>{
 /* ---------- Start ---------- */
 initSettings();
 if(sel!=null&&!targets[sel]) sel=null;
-renderTargets(); renderRec(); render();
+renderTargets(); renderRec(); setBasemap(); render();
 if(S.hdgMode==='compass') startCompass();
 if('serviceWorker' in navigator&&location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
 if(!('serial' in navigator)) $('hdgInfo').textContent='Hinweis: Web Serial nicht verfügbar – S900+ kann hier nicht verbunden werden.';
