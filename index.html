@@ -170,7 +170,7 @@ pre#log{font-size:11px;max-height:30vh;overflow:auto;background:#0f1317;padding:
         <select id="sVert"><option value="1">ja</option><option value="0">nein</option></select></div>
     </div>
     <div style="margin-top:8px"><label>Position aus</label>
-      <select id="sPos"><option value="gga">GGA – Antenne (Standard)</option><option value="ins">INS @GEINS – Neigungskorrektur (Test)</option></select></div>
+      <select id="sPos"><option value="gga">GGA – Antenne (Standard)</option><option value="ins">INS @GEINS – Stabspitze mit Neigungskorrektur</option></select></div>
     <div id="insInfo" class="hint" style="margin-top:6px">Keine INS-Daten (@GEINS) empfangen.</div>
     <p class="hint">Stabhöhe nur eintragen, wenn sie <b>nicht</b> schon im S900+ eingestellt ist. KML-Punkte ohne Koordinaten, aber mit SimpleData x/y, werden als UTM in der gewählten Zone gelesen.</p>
   </div>
@@ -519,6 +519,9 @@ function compose(){ // Position aus GGA oder INS zusammensetzen
   if(!gga){fix=null;render();return;}
   if(S.pos==='ins'&&insFresh()&&isFinite(gga.lat)){
     fix={...gga,lat:ins.lat,lon:ins.lon,alt:isFinite(ins.alt)?ins.alt:gga.alt,ins:true,t:Date.now()};
+  }else if(S.pos==='ins'&&isFinite(gga.lat)){
+    // INS fehlt: Antennenposition, Höhe um die zuletzt bekannte Stabhöhe reduziert – nur bei senkrechtem Stab genau
+    fix={...gga,alt:isFinite(gga.alt)&&ins&&isFinite(ins.pole)?gga.alt-ins.pole:gga.alt,noIns:true};
   }else fix={...gga};
   onFix();
 }
@@ -597,8 +600,8 @@ function renderStatus(){
   const cf=$('cFix');
   if(!fix){cf.textContent=source==='none'?'kein Fix':'keine Daten';cf.className='chip bad';}
   else{
-    cf.textContent=(source==='geo'?'Handy':(NMEA.Q[fix.q]||('Q'+fix.q)))+(fix.ins?' · INS':'');
-    cf.className='chip '+(fix.q===4&&source==='bt'?'ok':fix.q===5||fix.q===2||source==='geo'?'warn':'bad');
+    cf.textContent=(source==='geo'?'Handy':(NMEA.Q[fix.q]||('Q'+fix.q)))+(fix.ins?' · INS':fix.noIns?' · ohne INS!':'');
+    cf.className='chip '+(fix.noIns?'warn':fix.q===4&&source==='bt'?'ok':fix.q===5||fix.q===2||source==='geo'?'warn':'bad');
   }
   $('cSat').textContent='Sat '+(fix&&isFinite(fix.sats)?fix.sats:'–');
   $('cAcc').textContent=fix&&fix.sig!=null?'± '+fmt(fix.sig,fix.sig<1?3:1)+' m':fix&&isFinite(fix.hdop)?'HDOP '+fmt(fix.hdop,1):'± –';

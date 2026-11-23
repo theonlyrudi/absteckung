@@ -1,5 +1,5 @@
 // Offline-Cache. Bei Änderungen an der App VERSION hochzählen.
-const VERSION = 'v4';
+const VERSION = 'v5';
 const TILES = 'kacheln';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './leaflet.js', './leaflet.css'];
 let trimAt = 0;
