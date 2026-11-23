@@ -76,6 +76,7 @@ pre#log{font-size:11px;max-height:30vh;overflow:auto;background:#0f1317;padding:
     <span id="cSat" class="chip">Sat –</span>
     <span id="cAcc" class="chip">± –</span>
     <span id="cAge" class="chip">Korr –</span>
+    <span id="cTilt" class="chip" hidden>∠ –</span>
   </div>
   <div id="coord" class="coord">E – · N – · H –</div>
 </header>
@@ -168,6 +169,9 @@ pre#log{font-size:11px;max-height:30vh;overflow:auto;background:#0f1317;padding:
       <div><label>Ecken von Linien/Flächen laden</label>
         <select id="sVert"><option value="1">ja</option><option value="0">nein</option></select></div>
     </div>
+    <div style="margin-top:8px"><label>Position aus</label>
+      <select id="sPos"><option value="gga">GGA – Antenne (Standard)</option><option value="ins">INS @GEINS – Neigungskorrektur (Test)</option></select></div>
+    <div id="insInfo" class="hint" style="margin-top:6px">Keine INS-Daten (@GEINS) empfangen.</div>
     <p class="hint">Stabhöhe nur eintragen, wenn sie <b>nicht</b> schon im S900+ eingestellt ist. KML-Punkte ohne Koordinaten, aber mit SimpleData x/y, werden als UTM in der gewählten Zone gelesen.</p>
   </div>
   <div class="card">
@@ -239,6 +243,17 @@ const NMEA = (() => {
   }
   const num=v=>v===''||v==null?NaN:parseFloat(v);
   function parse(line){
+    const at=line.indexOf('@GEINS,');
+    if(at>=0){ // Stonex/IMU: @GEINS,Zeit,Breite,Länge,Höhe,vN,vE,vU,Richtung,Nick,Roll,…,Status,Stabhöhe*CS
+      const f=line.slice(at).split('*')[0].split(',');
+      if(f.length<12) return null;
+      const lat=num(f[2]), lon=num(f[3]);
+      if(!(Math.abs(lat)<=90&&Math.abs(lon)<=180)||(lat===0&&lon===0)) return null;
+      const pitch=num(f[9]), roll=num(f[10]), R=Math.PI/180;
+      const tilt=isFinite(pitch)&&isFinite(roll)?Math.acos(Math.min(1,Math.cos(pitch*R)*Math.cos(roll*R)))/R:NaN;
+      return {typ:'INS', time:f[1], lat, lon, alt:num(f[4]), hdg:num(f[8]), pitch, roll, tilt,
+        status:f[f.length-2], pole:num(f[f.length-1])};
+    }
     const st=line.indexOf('$'); if(st<0) return null;
     const s=line.slice(st).trim();
     if(s.length<7 || !ckOk(s)) return null;
@@ -361,7 +376,7 @@ const store={
   get(k,def){try{const v=localStorage.getItem('s900_'+k);return v?JSON.parse(v):def;}catch(e){return def;}},
   set(k,v){try{localStorage.setItem('s900_'+k,JSON.stringify(v));}catch(e){}}
 };
-const S=Object.assign({map:'off',zone:33,decl:5.0,tol:0.05,pole:0,near:2,vert:1,hdgMode:'compass',sort:'file'},store.get('set',{}));
+const S=Object.assign({pos:'gga',map:'off',zone:33,decl:5.0,tol:0.05,pole:0,near:2,vert:1,hdgMode:'compass',sort:'file'},store.get('set',{}));
 let targets=store.get('targets',[]);
 let shapes=store.get('shapes',[]);       // {name,lat,lon,h,done}
 let recorded=store.get('rec',[]);
@@ -384,12 +399,13 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
 /* ---------- Einstellungen ---------- */
 function initSettings(){
   $('sZone').value=S.zone; $('sDecl').value=S.decl; $('sTol').value=S.tol; $('sPole').value=S.pole; $('sNear').value=S.near; $('sVert').value=S.vert;
-  $('hdgMode').value=S.hdgMode; $('mapMode').value=S.map; $('sortT').value=S.sort;
+  $('hdgMode').value=S.hdgMode; $('mapMode').value=S.map; $('sPos').value=S.pos; $('sortT').value=S.sort;
   const r=store.get('recset',{prefix:'P',next:1,avg:'0'}); $('rPrefix').value=r.prefix; $('rNext').value=r.next; $('rAvg').value=r.avg;
   const bind=(id,k,parse)=>$(id).onchange=e=>{const v=parse(e.target.value); if(v!==null&&!(typeof v==='number'&&!isFinite(v))){S[k]=v;saveSet();render();}};
   bind('sZone','zone',v=>parseInt(v,10)); bind('sDecl','decl',v=>parseFloat(v.replace(',','.'))); bind('sTol','tol',v=>parseFloat(v.replace(',','.')));
   bind('sPole','pole',v=>parseFloat(v.replace(',','.'))); bind('sNear','near',v=>parseFloat(v.replace(',','.'))); bind('sVert','vert',v=>parseInt(v,10));
   $('hdgMode').onchange=e=>{S.hdgMode=e.target.value;saveSet();if(S.hdgMode==='compass')startCompass();render();};
+  $('sPos').onchange=e=>{S.pos=e.target.value;saveSet();compose();};
   $('mapMode').onchange=e=>{S.map=e.target.value;saveSet();setBasemap();};
   $('sortT').onchange=e=>{S.sort=e.target.value;saveSet();renderTargets();};
   const saveRec=()=>store.set('recset',{prefix:$('rPrefix').value,next:parseInt($('rNext').value,10)||1,avg:$('rAvg').value});
@@ -440,7 +456,7 @@ async function readLoop(p){
   await pipeDone;
   try{await p.close();}catch(e){}
   if(port===p){
-    port=null; source='none'; fix=null;
+    port=null; source='none'; fix=null; gga=null; ins=null;
     $('btnConn').textContent='S900+ verbinden'; $('btnConn').classList.add('pri');
     render();
     if(wantConn){toast('Verbindung zum S900+ verloren – verbinde neu, sobald er erreichbar ist …',true); tryReconnect();}
@@ -472,7 +488,7 @@ $('btnGeo').onclick=()=>{
     const c=pos.coords;
     fix={lat:c.latitude,lon:c.longitude,alt:c.altitude,q:1,sats:NaN,hdop:NaN,age:NaN,sig:c.accuracy,t:Date.now()};
     if(c.heading!=null&&c.speed>0.5){course=c.heading;speed=c.speed;}
-    lastGGA=Date.now(); onFix();
+    gga={...fix}; lastGGA=Date.now(); onFix();
   },e=>toast('GPS: '+e.message,true),{enableHighAccuracy:true,maximumAge:0});
   keepAwake();
   toast('Handy-GPS aktiv (nur Meter-Genauigkeit, zum Testen).');
@@ -486,16 +502,45 @@ function onLine(l){
   const m=NMEA.parse(l); if(!m) return;
   sentences++;
   if(m.typ==='GGA'){
-    if(!isFinite(m.lat)||m.q===0){fix={q:0,sats:m.sats,t:Date.now()}; lastGGA=Date.now(); onFix(); return;}
+    lastGGA=Date.now();
+    if(!isFinite(m.lat)||m.q===0){gga={q:0,sats:m.sats,t:Date.now()}; compose(); return;}
     const sig=gst&&Date.now()-gst.t<3000&&isFinite(gst.sLat)?Math.hypot(gst.sLat,gst.sLon):null;
-    fix={lat:m.lat,lon:m.lon,alt:m.alt,q:m.q,sats:m.sats,hdop:m.hdop,age:m.age,sig,sAlt:gst?gst.sAlt:null,t:Date.now()};
-    lastGGA=Date.now(); onFix();
+    gga={lat:m.lat,lon:m.lon,alt:m.alt,q:m.q,sats:m.sats,hdop:m.hdop,age:m.age,sig,sAlt:gst?gst.sAlt:null,t:Date.now(),time:m.time};
+    insDiag(); compose();
   }else if(m.typ==='RMC'){
     if(m.valid&&isFinite(m.course)&&m.speed>0.3){course=m.course;} speed=m.speed||0;
   }else if(m.typ==='GST'){gst={...m,t:Date.now()};}
+  else if(m.typ==='INS'){ins={...m,t:Date.now()}; insHist.push(ins); if(insHist.length>40) insHist.shift(); if(S.pos==='ins') compose(); else renderTilt();}
+}
+let gga=null, ins=null, insHist=[], insDiff=null;
+function insFresh(){return ins&&Date.now()-ins.t<1500;}
+function compose(){ // Position aus GGA oder INS zusammensetzen
+  if(!gga){fix=null;render();return;}
+  if(S.pos==='ins'&&insFresh()&&isFinite(gga.lat)){
+    fix={...gga,lat:ins.lat,lon:ins.lon,alt:isFinite(ins.alt)?ins.alt:gga.alt,ins:true,t:Date.now()};
+  }else fix={...gga};
+  onFix();
+}
+function insDiag(){ // INS-Epoche zur gleichen Zeit wie GGA suchen und vergleichen
+  if(!insHist.length||!isFinite(gga.lat)) return;
+  const e=insHist.find(x=>x.time&&gga.time&&Math.abs(parseFloat(x.time)-parseFloat(gga.time))<0.05);
+  if(!e) return;
+  const d=GEO.delta(gga,e);
+  insDiff={d:d.d,brg:d.brg,dh:isFinite(e.alt)&&isFinite(gga.alt)?e.alt-gga.alt:NaN,tilt:e.tilt,pole:e.pole,
+    exp:isFinite(e.pole)&&isFinite(e.tilt)?e.pole*Math.sin(e.tilt*Math.PI/180):NaN,hdg:e.hdg,status:e.status};
+}
+function renderTilt(){
+  const c=$('cTilt');
+  if(!insFresh()){c.hidden=true;}
+  else{c.hidden=false; c.textContent='∠ '+fmt(ins.tilt,1)+'°'; c.className='chip'+(S.pos==='ins'?' ok':'');}
+  const el=$('insInfo');
+  if(!ins){el.textContent='Keine INS-Daten (@GEINS) empfangen.';return;}
+  let t=`INS: Neigung ${fmt(ins.tilt,1)}° (Nick ${fmt(ins.pitch,1)}°, Roll ${fmt(ins.roll,1)}°), Richtung ${fmt(ins.hdg,1)}°, Status ${ins.status}, Stabhöhe im S900+ ${fmt(ins.pole,3)} m.`;
+  if(insDiff) t+=` Abstand INS↔GGA: ${fmt(insDiff.d,3)} m horizontal, ${fmt(insDiff.dh,3)} m Höhe. Erwartet, wenn INS = Stabspitze: ca. ${fmt(insDiff.exp,2)} m horizontal.`;
+  el.textContent=t;
 }
 setInterval(()=>{ // Datenausfall erkennen + Log
-  if(source!=='none'&&Date.now()-lastGGA>3000&&fix){fix=null;render();}
+  if(source!=='none'&&Date.now()-lastGGA>3000&&fix){fix=null;gga=null;render();}
   if(logOn){const lg=$('log'); lg.textContent=logLines.slice(-80).join('\n'); lg.scrollTop=lg.scrollHeight;}
   $('logInfo').textContent=`Empfangen: ${bytes} Byte, ${sentences} gültige NMEA-Sätze`+(source==='bt'&&bytes>0&&sentences===0?' – Daten kommen, aber kein NMEA: Ausgabe im S900+ prüfen.':'');
   if(source==='bt'&&bytes===0&&port) $('cFix').textContent='warte auf Daten';
@@ -543,14 +588,14 @@ async function keepAwake(){try{if('wakeLock' in navigator&&!wakeLock){wakeLock=a
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&source!=='none')keepAwake();});
 
 /* ---------- Anzeige ---------- */
-function render(){renderStatus();renderNav();renderTargetsLite();updateMap();}
+function render(){renderTilt();renderStatus();renderNav();renderTargetsLite();updateMap();}
 function renderStatus(){
   $('cSrc').textContent=source==='bt'?'S900+':source==='geo'?'Handy-GPS':'nicht verbunden';
   $('cSrc').className='chip'+(source==='bt'?' ok':source==='geo'?' warn':'');
   const cf=$('cFix');
   if(!fix){cf.textContent=source==='none'?'kein Fix':'keine Daten';cf.className='chip bad';}
   else{
-    cf.textContent=source==='geo'?'Handy':(NMEA.Q[fix.q]||('Q'+fix.q));
+    cf.textContent=(source==='geo'?'Handy':(NMEA.Q[fix.q]||('Q'+fix.q)))+(fix.ins?' · INS':'');
     cf.className='chip '+(fix.q===4&&source==='bt'?'ok':fix.q===5||fix.q===2||source==='geo'?'warn':'bad');
   }
   $('cSat').textContent='Sat '+(fix&&isFinite(fix.sats)?fix.sats:'–');
