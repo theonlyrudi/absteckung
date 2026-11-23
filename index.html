@@ -249,9 +249,10 @@ const NMEA = (() => {
       if(f.length<12) return null;
       const lat=num(f[2]), lon=num(f[3]);
       if(!(Math.abs(lat)<=90&&Math.abs(lon)<=180)||(lat===0&&lon===0)) return null;
-      const pitch=num(f[9]), roll=num(f[10]), R=Math.PI/180;
+      // Feldfolge laut Feldtest: [8],[9] = Neigungswinkel (Roll/Nick), [10] = Richtung
+      const roll=num(f[8]), pitch=num(f[9]), R=Math.PI/180;
       const tilt=isFinite(pitch)&&isFinite(roll)?Math.acos(Math.min(1,Math.cos(pitch*R)*Math.cos(roll*R)))/R:NaN;
-      return {typ:'INS', time:f[1], lat, lon, alt:num(f[4]), hdg:num(f[8]), pitch, roll, tilt,
+      return {typ:'INS', time:f[1], lat, lon, alt:num(f[4]), hdg:num(f[10]), pitch, roll, tilt,
         status:f[f.length-2], pole:num(f[f.length-1])};
     }
     const st=line.indexOf('$'); if(st<0) return null;
@@ -523,8 +524,9 @@ function compose(){ // Position aus GGA oder INS zusammensetzen
 }
 function insDiag(){ // INS-Epoche zur gleichen Zeit wie GGA suchen und vergleichen
   if(!insHist.length||!isFinite(gga.lat)) return;
-  const e=insHist.find(x=>x.time&&gga.time&&Math.abs(parseFloat(x.time)-parseFloat(gga.time))<0.05);
-  if(!e) return;
+  // INS-Epoche mit dem nächsten Empfangszeitpunkt (Zeitstempel können GPS- statt UTC-Zeit sein)
+  let e=null; for(const x of insHist) if(!e||Math.abs(x.t-gga.t)<Math.abs(e.t-gga.t)) e=x;
+  if(!e||Math.abs(e.t-gga.t)>400) return;
   const d=GEO.delta(gga,e);
   insDiff={d:d.d,brg:d.brg,dh:isFinite(e.alt)&&isFinite(gga.alt)?e.alt-gga.alt:NaN,tilt:e.tilt,pole:e.pole,
     exp:isFinite(e.pole)&&isFinite(e.tilt)?e.pole*Math.sin(e.tilt*Math.PI/180):NaN,hdg:e.hdg,status:e.status};
@@ -535,7 +537,7 @@ function renderTilt(){
   else{c.hidden=false; c.textContent='∠ '+fmt(ins.tilt,1)+'°'; c.className='chip'+(S.pos==='ins'?' ok':'');}
   const el=$('insInfo');
   if(!ins){el.textContent='Keine INS-Daten (@GEINS) empfangen.';return;}
-  let t=`INS: Neigung ${fmt(ins.tilt,1)}° (Nick ${fmt(ins.pitch,1)}°, Roll ${fmt(ins.roll,1)}°), Richtung ${fmt(ins.hdg,1)}°, Status ${ins.status}, Stabhöhe im S900+ ${fmt(ins.pole,3)} m.`;
+  let t=`INS: Neigung ${fmt(ins.tilt,1)}° (Winkel ${fmt(ins.roll,1)}° / ${fmt(ins.pitch,1)}°), Richtung ${fmt(ins.hdg,1)}°, Status ${ins.status}, Stabhöhe im S900+ ${fmt(ins.pole,3)} m.`;
   if(insDiff) t+=` Abstand INS↔GGA: ${fmt(insDiff.d,3)} m horizontal, ${fmt(insDiff.dh,3)} m Höhe. Erwartet, wenn INS = Stabspitze: ca. ${fmt(insDiff.exp,2)} m horizontal.`;
   el.textContent=t;
 }
